@@ -43,7 +43,7 @@ Requires `git`. Pick one (replace `OWNER` with this repo's GitHub owner):
 **As a uv/pipx tool** (recommended):
 
 ```console
-$ uv tool install git+https://github.com/OWNER/agentws
+$ uv tool install git+https://github.com/DiggidyDave/agentws
 ```
 
 **Single file** — the script is fully self-contained
@@ -58,7 +58,7 @@ $ curl -fsSL https://raw.githubusercontent.com/OWNER/agentws/main/agentws.py \
 **From a clone** (nice for hacking on it; requires `uv`):
 
 ```console
-$ git clone https://github.com/OWNER/agentws ~/dev/agentws
+$ git clone https://github.com/DiggidyDave/agentws ~/dev/agentws
 $ ln -s ~/dev/agentws/agentws.py ~/.local/bin/agentws
 ```
 
