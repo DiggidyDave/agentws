@@ -1,0 +1,9 @@
+README.md
+agentws.py
+pyproject.toml
+agentws.egg-info/PKG-INFO
+agentws.egg-info/SOURCES.txt
+agentws.egg-info/dependency_links.txt
+agentws.egg-info/entry_points.txt
+agentws.egg-info/requires.txt
+agentws.egg-info/top_level.txt
