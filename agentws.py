@@ -4,6 +4,7 @@
 # dependencies = [
 #   "typer>=0.12",
 #   "tomlkit>=0.12",
+#   "requests>=2.31",
 # ]
 # ///
 """agentws — create and manage multi-repo agentic workspaces.
@@ -26,6 +27,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import requests
 import tomlkit
 import typer
 
@@ -289,6 +291,45 @@ def write_workspace_meta(
     (ws_dir / WS_META).write_text(tomlkit.dumps(doc))
 
 
+def fetch_description_doc(url: str) -> str | None:
+    """Fetch a description URL; return its text if it's an embeddable document.
+
+    Returns None for pages that can't be usefully embedded (HTML apps like
+    issue trackers, auth walls, fetch errors) — callers fall back to linking.
+    """
+    try:
+        resp = requests.get(url, timeout=15, headers={"User-Agent": "agentws"})
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        warn(f"  could not fetch description document ({exc}); linking it instead")
+        return None
+    if "html" in resp.headers.get("content-type", "").lower():
+        return None
+    body = resp.text.strip()
+    if body[:15].lower().startswith(("<!doctype", "<html")):
+        return None
+    if len(body) > 16_000:
+        body = body[:16_000] + "\n\n… (truncated; read the full document at the URL above)"
+    return body
+
+
+def render_problem(description: str) -> str:
+    if not description:
+        return "(no description provided — ask the user what this workspace is for)"
+    if description.startswith(("http://", "https://")):
+        doc = fetch_description_doc(description)
+        if doc is not None:
+            return f"Issue document: {description}\n\n{doc}"
+        return (
+            f"Issue document: {description}\n\n"
+            "(Content could not be embedded automatically — likely an "
+            "authenticated or dynamic page. Fetch this URL with your available "
+            "tools — browser, issue-tracker MCP, etc. — and read it before "
+            "starting work.)"
+        )
+    return description
+
+
 def write_claude_md(
     ws_dir: Path, name: str, branch: str, profile: str, description: str,
     repos: list[dict],
@@ -297,7 +338,7 @@ def write_claude_md(
         f"| `{r['name']}/` | {r['url']} | `{r['base']}` | {r['mode']} |"
         for r in repos
     )
-    problem = description or "(no description provided — ask the user what this workspace is for)"
+    problem = render_problem(description)
     content = f"""\
 # Workspace: {name}
 
@@ -393,7 +434,10 @@ def create(
     profile: str = typer.Option(..., "-p", "--profile", help="Profile to use."),
     description: str = typer.Option(
         "", "-d", "--description",
-        help="What this workspace is for; included in the generated CLAUDE.md.",
+        help="What this workspace is for: freeform text, or an http(s) URL to "
+             "an issue/design doc (markdown docs are embedded in the generated "
+             "CLAUDE.md; tracker pages like Jira/Linear are linked for the "
+             "agent to fetch).",
     ),
     clone: bool = typer.Option(
         False, "--clone",

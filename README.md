@@ -125,6 +125,17 @@ fresh per workspace.
 - `CLAUDE.md` — human/agent-readable context: the problem statement (`-d`),
   the repo table, and conventions (work on branch `NAME`, push with
   `git push -u origin NAME`, don't rewrite history in worktrees).
+
+  `-d` also accepts an http(s) URL to a document describing the issue. Plain
+  documents (e.g. a raw markdown file) are fetched and embedded into
+  `CLAUDE.md` directly; pages that can't be fetched anonymously (Jira, Linear,
+  Notion, …) are recorded as a link with an instruction telling the agent to
+  fetch it with its own tools (browser, issue-tracker MCP) before starting:
+
+  ```console
+  $ agentws create -n fix-refund-flow -p payments \
+      -d https://linear.app/acme/issue/PAY-123/refunds-double-charge
+  ```
 - `.agentws-workspace.toml` — machine-readable metadata used by
   `list`/`status`/`rm`.
 

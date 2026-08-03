@@ -23,6 +23,9 @@ all checked out on the same named branch. Profiles (named repo sets) live in
    agentws create -n <name> -p <profile> -d "<one-line problem statement>"
    ```
 
+   If the user references an issue/design doc by URL (Jira, Linear, a
+   markdown doc, ...), pass that URL as `-d` instead — fetchable documents
+   get embedded in the workspace CLAUDE.md, tracker pages get linked.
    Add `--clone` only if the user asks for fully isolated clones.
 4. `cd` into the workspace path printed by the command and **read its
    `CLAUDE.md`** — it lists every repo, its upstream, and the working
