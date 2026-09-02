@@ -100,6 +100,27 @@ repos = [
 ]
 ```
 
+### Projects
+
+Some efforts outlive any single change: you spin up a workspace, land it,
+tear it down, and move to the next work item. A **project** captures that:
+a named entry pointing at a living document (local markdown or a URL) that
+holds the goal, open work items, and a change log spanning workspaces.
+
+```console
+$ agentws project add checkout-v2 --profile payments -d "Rework the checkout flow"
+Created project document skeleton at ~/.agentws/projects/checkout-v2.md
+$ agentws create -n retry-idempotency --project checkout-v2 -d "work item 2"
+```
+
+Workspaces created with `--project` inherit the project's default profile
+(no `-p` needed) and their `CLAUDE.md` tells agents to read the project doc
+at session start and update it (check off items, append change-log notes)
+before the workspace is torn down. `agentws rm` never touches project docs —
+projects outlive their workspaces. Point `--doc` at an existing file or URL
+to use a doc you already keep elsewhere. Without `--project`, workspaces are
+one-offs exactly as before.
+
 Submodules are initialized recursively after checkout by default (worktrees
 and clones leave them empty otherwise). Skip with `--no-submodules` on
 `create`/`add`, or per-repo as above. Note: submodules in worktrees live in
@@ -110,13 +131,15 @@ fresh per workspace.
 
 | Command | What it does |
 |---------|--------------|
-| `agentws create -n NAME -p PROFILE [-d DESC] [--clone] [--base BRANCH] [--branch BRANCH]` | Create (or resume) a workspace; branch `<branch_prefix>NAME` (or `--branch` exactly) in every repo. Idempotent — re-run to fill in repos that failed or were deleted. |
+| `agentws create -n NAME [-p PROFILE] [--project PROJECT] [-d DESC] [--clone] [--base BRANCH] [--branch BRANCH]` | Create (or resume) a workspace; branch `<branch_prefix>NAME` (or `--branch` exactly) in every repo. `--project` links it to a project and supplies the default profile. Idempotent — re-run to fill in repos that failed or were deleted. |
 | `agentws add REPO... [-w WORKSPACE] [--clone] [--base BRANCH]` | Add repo(s) to an existing workspace on its branch, without touching the profile. Workspace defaults to the one containing the cwd. To add a repo to every future workspace, edit the profile and re-run `create`. |
 | `agentws list` | All workspaces with per-repo dirty/unpushed rollup. |
 | `agentws status [NAME]` | Per-repo branch, dirty count, pushed state. Name defaults to the workspace containing the cwd. |
 | `agentws rm NAME [--force] [--delete-branches]` | Safe teardown: refuses if any repo has uncommitted or unpushed work unless `--force`. Branches are kept in the shared clones unless `--delete-branches`. |
 | `agentws profile add NAME REPO... [-d DESC]` | Define a profile (full URLs allowed). |
 | `agentws profile list` / `show NAME` / `rm NAME` | Inspect or remove profiles. |
+| `agentws project add NAME [--doc PATH_OR_URL] [--profile NAME] [-d DESC]` | Define a project; creates a skeleton doc under `~/.agentws/projects/` if `--doc` is omitted. |
+| `agentws project list` / `show NAME` / `rm NAME` | Inspect or remove projects (`rm` never deletes the doc). |
 
 ## Working with agents
 

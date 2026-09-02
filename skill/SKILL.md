@@ -11,9 +11,13 @@ all checked out on the same named branch. Profiles (named repo sets) live in
 
 ## Creating a workspace
 
-1. Pick the profile. Run `agentws profile list` and match the user's problem
-   domain to a profile. If nothing fits, show the list and ask; offer to
-   create a profile with `agentws profile add <name> <repo>...`.
+1. If the user names a long-running project (or the work is clearly part of
+   one), check `agentws project list` and pass `--project <name>` — the
+   project supplies the default profile. Otherwise pick the profile: run
+   `agentws profile list` and match the user's problem domain. If nothing
+   fits, show the list and ask; offer to create a profile with
+   `agentws profile add <name> <repo>...` (or a project with
+   `agentws project add`).
 2. Derive a branch/workspace name from the problem: short kebab-case,
    e.g. "the refund double-charge bug" → `fix-refund-double-charge`.
    Confirm the name with the user if it isn't obvious.
@@ -46,6 +50,17 @@ all checked out on the same named branch. Profiles (named repo sets) live in
 - Every future workspace of this profile: add the repo to the profile in
   `~/.agentws/config.toml`, then re-run the original `agentws create`
   command — it is idempotent and fills in only the missing repo.
+
+## Projects (work spanning multiple workspaces)
+
+A workspace linked to a project (`--project`) has a `## Project` section in
+its CLAUDE.md pointing at the project's living document. Follow it:
+
+- Read the project document at the start of every session.
+- When the workspace's change completes a project work item, update the
+  document (check off the item, append a change-log entry: what changed,
+  which repos, which branch, follow-ups) **before** running `agentws rm`.
+- Local docs you edit directly; URL docs via your browser/issue-tracker tools.
 
 ## Other operations
 

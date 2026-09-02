@@ -39,6 +39,11 @@ app = typer.Typer(
 )
 profile_app = typer.Typer(help="Manage workspace profiles.", no_args_is_help=True)
 app.add_typer(profile_app, name="profile")
+project_app = typer.Typer(
+    help="Manage projects: long-lived efforts with a living doc, spanning many workspaces.",
+    no_args_is_help=True,
+)
+app.add_typer(project_app, name="project")
 
 WS_META = ".agentws-workspace.toml"
 
@@ -69,6 +74,38 @@ branch_prefix = ""  # e.g. "jane/" -> workspace 'fix-x' works on branch 'jane/fi
 #   "api-gateway",
 #   "deploy-config",
 # ]
+
+# Projects are long-lived efforts that span many workspaces. Each has a
+# living document (local path or URL) holding shared context: open work
+# items and notes from completed changes. Manage with 'agentws project'.
+#
+# [projects.checkout-v2]
+# description = "Rework the checkout flow"
+# doc = "~/.agentws/projects/checkout-v2.md"
+# profile = "payments"  # default profile for this project's workspaces
+"""
+
+PROJECT_DOC_SKELETON = """\
+# Project: {name}
+
+{description}
+
+## Goal
+
+(What does "done" look like for this project?)
+
+## Work items
+
+- [ ] ...
+
+## Change log
+
+(One entry per completed change: date, branch, what changed in which repos,
+follow-ups. Newest first.)
+
+## Notes
+
+(Shared context worth carrying between changes.)
 """
 
 
@@ -125,6 +162,26 @@ def config_path() -> Path:
 
 def bare_repos_dir() -> Path:
     return agentws_home() / "repos"
+
+
+def project_docs_dir() -> Path:
+    return agentws_home() / "projects"
+
+
+def project_context(cfg: tomlkit.TOMLDocument, project_name: str | None) -> dict | None:
+    """Resolve a project name to what CLAUDE.md rendering needs.
+
+    Tolerant of projects since removed from config (workspace metadata may
+    still reference them).
+    """
+    if not project_name:
+        return None
+    p = cfg.get("projects", {}).get(project_name, {})
+    return {
+        "name": project_name,
+        "doc": p.get("doc", ""),
+        "description": p.get("description", ""),
+    }
 
 
 def load_config() -> tomlkit.TOMLDocument:
@@ -275,13 +332,15 @@ def clone_repo(spec: RepoSpec, dest: Path, branch: str, base_override: str | Non
 
 def write_workspace_meta(
     ws_dir: Path, name: str, branch: str, profile: str, description: str,
-    repos: list[dict],
+    repos: list[dict], project: str | None = None,
 ) -> None:
     doc = tomlkit.document()
     doc["name"] = name
     doc["profile"] = profile
     doc["branch"] = branch
     doc["description"] = description
+    if project:
+        doc["project"] = project
     aot = tomlkit.aot()
     for repo in repos:
         item = tomlkit.table()
@@ -330,9 +389,41 @@ def render_problem(description: str) -> str:
     return description
 
 
+def render_project_section(project: dict | None) -> str:
+    """The Project block for CLAUDE.md; empty string for one-off workspaces."""
+    if not project:
+        return ""
+    desc = f" — {project['description']}" if project.get("description") else ""
+    doc = project.get("doc", "")
+    if not doc:
+        where = ("(Its document is no longer configured; ask the user where "
+                 "the project doc lives.)")
+    elif doc.startswith(("http://", "https://")):
+        where = (f"Living project document: {doc}\n"
+                 "(Fetch it with your available tools — browser, issue-tracker "
+                 "MCP, etc.)")
+    else:
+        where = f"Living project document: `{Path(doc).expanduser()}`"
+    return f"""\
+
+## Project
+
+Part of the long-running project `{project['name']}`{desc}. The project
+document is shared, living context that outlives this workspace: the goal,
+open work items, and notes from changes made in earlier workspaces.
+
+{where}
+
+- Read the project document at the start of every session.
+- When work here completes a project work item, update the document — check
+  the item off and add a change-log entry (what changed, in which repos, on
+  which branch, plus follow-ups) — before this workspace is removed.
+"""
+
+
 def write_claude_md(
     ws_dir: Path, name: str, branch: str, profile: str, description: str,
-    repos: list[dict],
+    repos: list[dict], project: dict | None = None,
 ) -> None:
     rows = "\n".join(
         f"| `{r['name']}/` | {r['url']} | `{r['base']}` | {r['mode']} |"
@@ -348,7 +439,7 @@ Every repo below is checked out on branch `{branch}`.
 ## Problem
 
 {problem}
-
+{render_project_section(project)}
 ## Repos
 
 | Directory | Upstream | Based on | Checkout |
@@ -431,7 +522,16 @@ def create(
         None, "--branch",
         help="Exact branch name to use, ignoring name and branch_prefix.",
     ),
-    profile: str = typer.Option(..., "-p", "--profile", help="Profile to use."),
+    profile: str = typer.Option(
+        None, "-p", "--profile",
+        help="Profile to use (optional when --project defines one).",
+    ),
+    project: str = typer.Option(
+        None, "--project",
+        help="Long-running project this workspace is part of (see 'agentws "
+             "project'). Its living doc is referenced in CLAUDE.md and its "
+             "profile is used when -p is omitted.",
+    ),
     description: str = typer.Option(
         "", "-d", "--description",
         help="What this workspace is for: freeform text, or an http(s) URL to "
@@ -458,20 +558,38 @@ def create(
     branch = branch_override or f"{prefix}{name}"
     if not git_ok("check-ref-format", "--branch", branch):
         raise Fail(f"'{branch}' is not a valid git branch name.")
-    specs = resolve_repos(cfg, profile)
     ws_dir = workspace_root(cfg) / name
 
     if ws_dir.exists() and not (ws_dir / WS_META).exists() and any(ws_dir.iterdir()):
         raise Fail(f"{ws_dir} exists and is not an agentws workspace.")
 
-    # Resuming an existing workspace: its recorded branch, description, and
-    # per-repo details win over whatever this invocation would derive.
+    # Resuming an existing workspace: its recorded branch, description,
+    # project, and per-repo details win over what this invocation derives.
     existing = None
     if (ws_dir / WS_META).exists():
         existing = load_workspace_meta(ws_dir)
         branch = branch_override or existing.get("branch", branch)
         description = description or existing.get("description", "")
+        project = project or existing.get("project")
     prior = {r["name"]: dict(r) for r in (existing or {}).get("repos", [])}
+
+    projects_cfg = cfg.get("projects", {})
+    if project and project not in projects_cfg and not (existing or {}).get("project"):
+        known = ", ".join(sorted(projects_cfg)) or "(none defined)"
+        raise Fail(
+            f"Unknown project '{project}'. Known projects: {known}\n"
+            f"Add one with: agentws project add {project}"
+        )
+    if not profile and project:
+        profile = projects_cfg.get(project, {}).get("profile") or None
+    if not profile:
+        profile = (existing or {}).get("profile") or None
+    if not profile:
+        raise Fail(
+            "No profile: pass -p/--profile, or use --project with a project "
+            "that defines a default profile."
+        )
+    specs = resolve_repos(cfg, profile)
 
     ws_dir.mkdir(parents=True, exist_ok=True)
     info(f"Workspace {ws_dir}")
@@ -509,8 +627,13 @@ def create(
     repos_meta.extend(r for n, r in prior.items() if n not in covered)
 
     if repos_meta:
-        write_workspace_meta(ws_dir, name, branch, profile, description, repos_meta)
-        write_claude_md(ws_dir, name, branch, profile, description, repos_meta)
+        write_workspace_meta(
+            ws_dir, name, branch, profile, description, repos_meta, project
+        )
+        write_claude_md(
+            ws_dir, name, branch, profile, description, repos_meta,
+            project_context(cfg, project),
+        )
 
     if failures:
         err(
@@ -585,13 +708,15 @@ def add(
             failures.append(spec.name)
             err(f"  {spec.name}: FAILED\n{exc}")
 
+    project = meta.get("project")
     write_workspace_meta(
         ws_dir, meta["name"], branch, meta["profile"],
-        meta.get("description", ""), repos_meta,
+        meta.get("description", ""), repos_meta, project,
     )
     write_claude_md(
         ws_dir, meta["name"], branch, meta["profile"],
         meta.get("description", ""), repos_meta,
+        project_context(cfg, project),
     )
     if failures:
         err(f"\n{len(failures)} repo(s) failed: {', '.join(failures)}.")
@@ -625,9 +750,10 @@ def list_workspaces() -> None:
         if unpushed:
             flags.append(f"{unpushed} unpushed")
         flag_str = f"  [{', '.join(flags)}]" if flags else "  [clean]"
+        proj = f" project={meta['project']}" if meta.get("project") else ""
         info(
             f"{meta['name']:<24} profile={meta['profile']:<16} "
-            f"{len(states)} repos{flag_str}"
+            f"{len(states)} repos{flag_str}{proj}"
         )
     if not found:
         info(f"No agentws workspaces under {root}.")
@@ -648,7 +774,8 @@ def status(
         name = ws_dir.name
     meta = load_workspace_meta(ws_dir)
     desc = meta.get("description", "")
-    info(f"Workspace {name} (profile={meta['profile']})"
+    proj = f", project={meta['project']}" if meta.get("project") else ""
+    info(f"Workspace {name} (profile={meta['profile']}{proj})"
          + (f": {desc}" if desc else ""))
     for r in meta.get("repos", []):
         repo_dir = ws_dir / r["name"]
@@ -793,6 +920,104 @@ def profile_rm(name: str = typer.Argument(...)) -> None:
     del profiles[name]
     save_config(cfg)
     ok(f"Removed profile '{name}'.")
+
+
+# ------------------------------------------------------- project commands ---
+
+@project_app.command("list")
+def project_list() -> None:
+    """List configured projects."""
+    cfg = load_config()
+    projects = cfg.get("projects", {})
+    if not projects:
+        info("No projects defined. Add one with 'agentws project add'.")
+        return
+    for pname in sorted(projects):
+        p = projects[pname]
+        parts = []
+        if p.get("profile"):
+            parts.append(f"profile={p['profile']}")
+        if p.get("doc"):
+            parts.append(f"doc={p['doc']}")
+        desc = f"  — {p['description']}" if p.get("description") else ""
+        info(f"{pname:<20} {', '.join(parts)}{desc}")
+
+
+@project_app.command("show")
+def project_show(name: str = typer.Argument(...)) -> None:
+    """Show a project's configuration and document status."""
+    cfg = load_config()
+    projects = cfg.get("projects", {})
+    if name not in projects:
+        raise Fail(f"No project named '{name}'.")
+    p = projects[name]
+    info(f"[{name}]" + (f" {p['description']}" if p.get("description") else ""))
+    if p.get("profile"):
+        info(f"  default profile: {p['profile']}")
+    doc = p.get("doc", "")
+    if not doc:
+        warn("  no document configured")
+    elif doc.startswith(("http://", "https://")):
+        info(f"  document: {doc}")
+    else:
+        path = Path(doc).expanduser()
+        state = "" if path.exists() else "  (MISSING)"
+        info(f"  document: {path}{state}")
+
+
+@project_app.command("add")
+def project_add(
+    name: str = typer.Argument(..., help="Project name."),
+    doc: str = typer.Option(
+        None, "--doc",
+        help="Path or URL of the living project document. Default: a skeleton "
+             "created under the agentws home projects/ directory.",
+    ),
+    profile: str = typer.Option(
+        None, "--profile", help="Default profile for this project's workspaces."
+    ),
+    description: str = typer.Option("", "-d", "--description"),
+) -> None:
+    """Add a project (creates a skeleton doc if none is given)."""
+    cfg = load_config()
+    projects = cfg.setdefault("projects", tomlkit.table())
+    if name in projects:
+        raise Fail(f"Project '{name}' already exists. Edit {config_path()} to change it.")
+    if profile and profile not in cfg.get("profiles", {}):
+        raise Fail(f"Unknown profile '{profile}'. Define it first (agentws profile add).")
+
+    doc = doc or str(project_docs_dir() / f"{name}.md")
+    if not doc.startswith(("http://", "https://")):
+        path = Path(doc).expanduser()
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                PROJECT_DOC_SKELETON.format(name=name, description=description)
+            )
+            info(f"Created project document skeleton at {path}")
+
+    table = tomlkit.table()
+    if description:
+        table["description"] = description
+    table["doc"] = doc
+    if profile:
+        table["profile"] = profile
+    projects[name] = table
+    save_config(cfg)
+    ok(f"Added project '{name}' to {config_path()}")
+
+
+@project_app.command("rm")
+def project_rm(name: str = typer.Argument(...)) -> None:
+    """Remove a project from config (its document is left in place)."""
+    cfg = load_config()
+    projects = cfg.get("projects", {})
+    if name not in projects:
+        raise Fail(f"No project named '{name}'.")
+    doc = projects[name].get("doc", "")
+    del projects[name]
+    save_config(cfg)
+    ok(f"Removed project '{name}'." + (f" Document kept: {doc}" if doc else ""))
 
 
 def main() -> None:
