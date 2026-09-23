@@ -1,2 +1,6 @@
 __pycache__/
 .DS_Store
+build/
+agentws.egg-info/
+dist/
+uv.lock

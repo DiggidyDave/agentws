@@ -17,7 +17,13 @@ all checked out on the same named branch. Profiles (named repo sets) live in
    `agentws profile list` and match the user's problem domain. If nothing
    fits, show the list and ask; offer to create a profile with
    `agentws profile add <name> <repo>...` (or a project with
-   `agentws project add`).
+   `agentws project add`). A profile named `default` (which may have no
+   repos) is used automatically when `-p`/`--project` is omitted — an
+   empty-profile workspace starts with no repos, and you add them with
+   `agentws add` as the work reveals what's needed. For one-off repo sets,
+   skip profiles entirely: pass `--repo <repo>` on `create` (repeatable;
+   accepts bare names, `host/owner/repo` like `github.com/acme/foo`, or
+   full git URLs), alone or on top of a profile.
 2. Derive a branch/workspace name from the problem: short kebab-case,
    e.g. "the refund double-charge bug" → `fix-refund-double-charge`.
    Confirm the name with the user if it isn't obvious.
@@ -67,6 +73,11 @@ its CLAUDE.md pointing at the project's living document. Follow it:
 - `agentws list` — all workspaces with dirty/unpushed rollup.
 - `agentws status [<name>]` — per-repo detail; run before reporting progress.
   The name is optional when the cwd is inside the workspace.
+- `agentws update [<name>]` — fetch origin and rebase every repo onto its
+  base branch. Dirty repos are skipped (pass `--autostash` to stash around
+  the rebase); conflicting rebases are aborted and reported — resolve those
+  manually in the repo. After it rebases an already-pushed branch, republish
+  with `git push --force-with-lease`.
 - `agentws rm <name>` — teardown. It refuses if work is uncommitted or
   unpushed; relay that to the user rather than reaching for `--force`.
   Never use `--force` or `--delete-branches` without explicit user approval.

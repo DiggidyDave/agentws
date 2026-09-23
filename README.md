@@ -88,6 +88,24 @@ repos = [
 ]
 ```
 
+A profile named `default` is the fallback when `create` is run without
+`-p`/`--project`. Profiles may have no repos at all (`agentws profile add
+default` with no repo arguments) — the workspace is created empty, with just
+its branch name, metadata, and `CLAUDE.md`, and you populate it as you go
+with `agentws add`.
+
+Profiles are optional entirely: `--repo` on `create` names repos directly
+(repeatable), on top of a profile or instead of one:
+
+```console
+$ agentws create -n try-foo --repo github.com/DiggidyDave/foo -d "kick the tires"
+```
+
+Everywhere a repo argument is accepted (`--repo`, `agentws add`,
+`agentws profile add`), it may be a bare name (expanded via `defaults.org`),
+a `host/owner/repo` shorthand like above (expanded to `https://`), or a full
+git URL (`git@...`, `https://...`, `file://...`).
+
 Repo entries can be tables for per-repo overrides:
 
 ```toml
@@ -131,12 +149,13 @@ fresh per workspace.
 
 | Command | What it does |
 |---------|--------------|
-| `agentws create -n NAME [-p PROFILE] [--project PROJECT] [-d DESC] [--clone] [--base BRANCH] [--branch BRANCH]` | Create (or resume) a workspace; branch `<branch_prefix>NAME` (or `--branch` exactly) in every repo. `--project` links it to a project and supplies the default profile. Idempotent — re-run to fill in repos that failed or were deleted. |
-| `agentws add REPO... [-w WORKSPACE] [--clone] [--base BRANCH]` | Add repo(s) to an existing workspace on its branch, without touching the profile. Workspace defaults to the one containing the cwd. To add a repo to every future workspace, edit the profile and re-run `create`. |
+| `agentws create -n NAME [-p PROFILE] [--repo REPO]... [--project PROJECT] [-d DESC] [--clone] [--base BRANCH] [--branch BRANCH]` | Create (or resume) a workspace; branch `<branch_prefix>NAME` (or `--branch` exactly) in every repo. `--repo` adds repos on top of the profile's (or stands alone — no profile needed). `--project` links it to a project and supplies the default profile; with none of these, a profile named `default` is used if defined. Idempotent — re-run to fill in repos that failed or were deleted. |
+| `agentws add REPO... [-w WORKSPACE] [--clone] [--base BRANCH]` | Add repo(s) to an existing workspace on its branch, without touching the profile (bare names, `host/owner/repo`, or full URLs). Workspace defaults to the one containing the cwd. To add a repo to every future workspace, edit the profile and re-run `create`. |
 | `agentws list` | All workspaces with per-repo dirty/unpushed rollup. |
 | `agentws status [NAME]` | Per-repo branch, dirty count, pushed state. Name defaults to the workspace containing the cwd. |
+| `agentws update [NAME] [--autostash]` | Fetch origin and rebase every repo onto its base branch. Dirty repos are skipped unless `--autostash`; a conflicting rebase is aborted (repo untouched) and reported for manual resolution. Reminds you to `push --force-with-lease` where the branch was already published. |
 | `agentws rm NAME [--force] [--delete-branches]` | Safe teardown: refuses if any repo has uncommitted or unpushed work unless `--force`. Branches are kept in the shared clones unless `--delete-branches`. |
-| `agentws profile add NAME REPO... [-d DESC]` | Define a profile (full URLs allowed). |
+| `agentws profile add NAME [REPO...] [-d DESC]` | Define a profile (full URLs allowed; omit repos for an empty profile). |
 | `agentws profile list` / `show NAME` / `rm NAME` | Inspect or remove profiles. |
 | `agentws project add NAME [--doc PATH_OR_URL] [--profile NAME] [-d DESC]` | Define a project; creates a skeleton doc under `~/.agentws/projects/` if `--doc` is omitted. |
 | `agentws project list` / `show NAME` / `rm NAME` | Inspect or remove projects (`rm` never deletes the doc). |
